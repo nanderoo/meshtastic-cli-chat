@@ -208,9 +208,9 @@ def set_sticky_node(node_list, sticky_node_id, message_lines, prompt_text, stick
 
     if (sticky_node_id == '!!'):
         sticky_node_text = ""
-        sticky_node_id = None
-        prompt_text = prompt_text.strip(">") # Handles repeat calls to /sn '!!'
-        prompt_text = f"{prompt_text}>"
+        sticky_node_id = ""
+        prompt_text = prompt_text.strip(" >") # Handles repeat calls to /sn '!!'
+        prompt_text = f"{prompt_text} >"
         message_lines.append(("Unsetting Sticky Node", False))
 
     else:
@@ -219,14 +219,13 @@ def set_sticky_node(node_list, sticky_node_id, message_lines, prompt_text, stick
             if (node['num'] == sticky_node_id):
                 node_found = True
                 message_lines.append((f"Setting Sticky Node to {sticky_node_id} ({node['user']['shortName']})", False))
-                prompt_text = prompt_text.strip(">")
-                sticky_node_text = f" -> [{sticky_node_id}] {node['user']['shortName']}>"
-                message_lines.append((f"{prompt_text}{sticky_node_text}", False))
+                prompt_text = prompt_text.strip(" >")
+                sticky_node_text = f" to [{sticky_node_id}] {node['user']['shortName']}>"
         
         if (node_found == False):
             message_lines.append(("Node not found!?", False))
 
-    return [prompt_text, sticky_node_text]
+    return [prompt_text, sticky_node_text, sticky_node_id]
 
 def refresh_screen(stdscr, prompt_text, sticky_node_text, input_text, message_lines):
     # Clear loading screen and refresh
@@ -247,6 +246,7 @@ def main(stdscr):
     showcounter = 0
     prompt_text = ""
     sticky_node_text = ""
+    sticky_node_id = ""
     input_text = ""
     message_lines = []
     suggestions = []
@@ -279,9 +279,9 @@ def main(stdscr):
 
         # Use the local node's short name as the prompt if available
         if node_list:
-            prompt_text = f"[{node_list[0]['num']}] {node_list[0]['user']['shortName']}>" # Adjust prompt formatting here
+            prompt_text = f"{node_list[0]['num']} ({node_list[0]['user']['shortName']}) >" # Adjust prompt formatting here
         else:
-            prompt_text = f"Unknown@{connection_method}>" # Fallback if node list is empty
+            prompt_text = f"Unknown@{connection_method} >" # Fallback if node list is empty
 
         refresh_screen(stdscr, prompt_text, sticky_node_text, input_text, message_lines)
 
@@ -322,7 +322,7 @@ def main(stdscr):
                         command_parts = input_text.strip().split(maxsplit=1)
                         if (len(command_parts) == 2):
                             sticky_node_id = command_parts[1]
-                            [prompt_text, sticky_node_text] = set_sticky_node(node_list, sticky_node_id, message_lines, prompt_text, sticky_node_text)
+                            [prompt_text, sticky_node_text, sticky_node_id] = set_sticky_node(node_list, sticky_node_id, message_lines, prompt_text, sticky_node_text)
                             refresh_screen(stdscr, prompt_text, sticky_node_text, input_text, message_lines)
                         else:
                             message_lines.append(("Invalid command format. Use '/sn <!Node ID>' to set or '/sn !!' to clear.", False))
@@ -342,7 +342,7 @@ def main(stdscr):
                             # Display own message immediately
                             timestamp = time.strftime("%H:%M:%S")
                             dest_shortname = next((node['user']['shortName'] for node in node_list if node['num'] == nodeId), 'Unknown')
-                            message_lines.append((f"{timestamp} {prompt_text} to {nodeId} ({dest_shortname}) 📩 {message}", True))  # Store as tuple with PM flag
+                            message_lines.append((f"{timestamp} {prompt_text.strip(' >')} to {nodeId} ({dest_shortname})> {message}", True))  # Store as tuple with PM flag
                             input_text = ""
                             stdscr.clear()
                         else:
@@ -371,15 +371,17 @@ def main(stdscr):
 
                     else:
                         # Check for sticky node and send private
-                        if (sticky_node_id != None):
+                        if (sticky_node_id != ""):
                             # Send private message
+                            is_pm = True
                             interface.sendText(input_text, sticky_node_id, channelIndex=channel_index)
                         else:
                             # Otherwise Send public message
+                            is_pm = False
                             interface.sendText(input_text, channelIndex=channel_index)
                         # Display own message immediately
                         timestamp = time.strftime("%H:%M:%S")
-                        message_lines.append((f"{timestamp} {prompt_text}{sticky_node_text} {input_text}", False))
+                        message_lines.append((f"{timestamp} {prompt_text}{sticky_node_text} {input_text}", is_pm))
                         input_text = ""
 
                     # Push existing messages up
