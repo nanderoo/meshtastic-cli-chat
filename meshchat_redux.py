@@ -89,6 +89,7 @@ def display_help(stdscr):
         "Commands:",
         "/h - Display this help message",
         "/ln - Display the list of nodes",
+        "/sn <!nodeId> or /sn !! - Set or clear the Sticky Node"
         "/lc - Display the list of Channels",
         "/sc <#> - Switch to Channel Number <#>",
         "/m !nodeId <message> - Send a private message to nodeId",
@@ -159,8 +160,8 @@ def on_receive(packet, interface, node_list, stdscr, input_text, message_lines):
             stdscr.hline(curses.LINES - 3, 2, curses.ACS_HLINE, curses.COLS - 4)  # 2 spaces padding on each side
 
             # Set the input line with padding
-            stdscr.addstr(curses.LINES - 2, 2, f"{prompt_text} {input_text} ")
-            stdscr.move(curses.LINES - 2, 2 + len(prompt_text) + len(input_text) + 1)
+            stdscr.addstr(curses.LINES - 2, 2, f"{prompt_text}{sticky_node_text} {input_text} ")
+            stdscr.move(curses.LINES - 2, 2 + len(prompt_text+sticky_node_text) + len(input_text) + 1)
 
             # Refresh the screen
             stdscr.refresh()
@@ -202,15 +203,56 @@ def change_channel(channel_index, new_channel_id, message_lines):
     else:
         message_lines.append(("Invalid Channel Selected", False))
 
+def set_sticky_node(node_list, sticky_node_id, message_lines, prompt_text, sticky_node_text):
+    # @TODO: Lookup node id for short name and check to be sure its one in the known list of nodes?
+
+    if (sticky_node_id == '!!'):
+        sticky_node_text = ""
+        sticky_node_id = None
+        prompt_text = prompt_text.strip(">") # Handles repeat calls to /sn '!!'
+        prompt_text = f"{prompt_text}>"
+        message_lines.append(("Unsetting Sticky Node", False))
+
+    else:
+        node_found = False
+        for idx, node in enumerate(node_list[::-1]):  # Print from bottom to top
+            if (node['num'] == sticky_node_id):
+                node_found = True
+                message_lines.append((f"Setting Sticky Node to {sticky_node_id} ({node['user']['shortName']})", False))
+                prompt_text = prompt_text.strip(">")
+                sticky_node_text = f" -> [{sticky_node_id}] {node['user']['shortName']}>"
+                message_lines.append((f"{prompt_text}{sticky_node_text}", False))
+        
+        if (node_found == False):
+            message_lines.append(("Node not found!?", False))
+
+    return [prompt_text, sticky_node_text]
+
+def refresh_screen(stdscr, prompt_text, sticky_node_text, input_text, message_lines):
+    # Clear loading screen and refresh
+    stdscr.clear()
+    stdscr.refresh()
+
+    # Insert a solid horizontal line with padding
+    stdscr.hline(curses.LINES - 3, 2, curses.ACS_HLINE, curses.COLS - 4)  # 2 spaces padding on each side
+
+    # Set the input line prompt with padding
+    stdscr.addstr(curses.LINES - 2, 2, f"{prompt_text}{sticky_node_text} {input_text} ")
+    stdscr.move(curses.LINES - 2, 2 + len(prompt_text+sticky_node_text) + len(input_text) + 1)
+    stdscr.refresh()
+
 def main(stdscr):
 
     running = True # Used to more gracefully exit our while loop
     showcounter = 0
+    prompt_text = ""
+    sticky_node_text = ""
     input_text = ""
     message_lines = []
     suggestions = []
     display_suggestions = False
     local_node = None
+    stick_node = None
 
     try:
 
@@ -236,24 +278,12 @@ def main(stdscr):
         show_loading_screen(stdscr, interface_mode)
 
         # Use the local node's short name as the prompt if available
-        global prompt_text
-
         if node_list:
-            prompt_text = f"{node_list[0]['user']['shortName']}@{connection_method}>" # Adjust prompt formatting here
+            prompt_text = f"[{node_list[0]['num']}] {node_list[0]['user']['shortName']}>" # Adjust prompt formatting here
         else:
             prompt_text = f"Unknown@{connection_method}>" # Fallback if node list is empty
 
-        # Clear loading screen and refresh
-        stdscr.clear()
-        stdscr.refresh()
-
-        # Insert a solid horizontal line with padding
-        stdscr.hline(curses.LINES - 3, 2, curses.ACS_HLINE, curses.COLS - 4)  # 2 spaces padding on each side
-
-        # Set the input line prompt with padding
-        stdscr.addstr(curses.LINES - 2, 2, f"{prompt_text} {input_text} ")
-        stdscr.move(curses.LINES - 2, 2 + len(prompt_text) + len(input_text) + 1)
-        stdscr.refresh()
+        refresh_screen(stdscr, prompt_text, sticky_node_text, input_text, message_lines)
 
         # Subscribe the callback function to message reception
         def on_receive_wrapper(packet, interface):
@@ -288,7 +318,19 @@ def main(stdscr):
                         list_nodes(node_list, message_lines)
                         # Clear the input line
                         input_text = ""
-
+                    elif (input_text.strip().startswith('/sn ')): # sn = Select node (sticky)
+                        command_parts = input_text.strip().split(maxsplit=1)
+                        if (len(command_parts) == 2):
+                            sticky_node_id = command_parts[1]
+                            [prompt_text, sticky_node_text] = set_sticky_node(node_list, sticky_node_id, message_lines, prompt_text, sticky_node_text)
+                            refresh_screen(stdscr, prompt_text, sticky_node_text, input_text, message_lines)
+                        else:
+                            message_lines.append(("Invalid command format. Use '/sn <!Node ID>' to set or '/sn !!' to clear.", False))
+                        input_text = ""
+                    elif (input_text.strip() == '/ln'): # ln = List Nodes
+                        list_nodes(node_list, message_lines)
+                        # Clear the input line
+                        input_text = ""
                     elif (input_text.strip().startswith('/m !')): # m = (Direct) Message
                         # Extract nodeId and message from input
                         command_parts = input_text.strip().split(maxsplit=2)
@@ -328,11 +370,16 @@ def main(stdscr):
                         # Silently do not send public empty messages
 
                     else:
-                        # Send public message
-                        interface.sendText(input_text, channelIndex=channel_index)
+                        # Check for sticky node and send private
+                        if (sticky_node_id != None):
+                            # Send private message
+                            interface.sendText(input_text, sticky_node_id, channelIndex=channel_index)
+                        else:
+                            # Otherwise Send public message
+                            interface.sendText(input_text, channelIndex=channel_index)
                         # Display own message immediately
                         timestamp = time.strftime("%H:%M:%S")
-                        message_lines.append((f"{timestamp} {prompt_text} {input_text}", False))
+                        message_lines.append((f"{timestamp} {prompt_text}{sticky_node_text} {input_text}", False))
                         input_text = ""
 
                     # Push existing messages up
@@ -369,8 +416,8 @@ def main(stdscr):
                 stdscr.hline(curses.LINES - 3, 2, curses.ACS_HLINE, curses.COLS - 4)  # 2 spaces padding on each side
 
                 # Set the input line with padding
-                stdscr.addstr(curses.LINES - 2, 2, f"{prompt_text} {input_text} ")
-                stdscr.move(curses.LINES - 2, 2 + len(prompt_text) + len(input_text) + 1)
+                stdscr.addstr(curses.LINES - 2, 2, f"{prompt_text}{sticky_node_text} {input_text} ")
+                stdscr.move(curses.LINES - 2, 2 + len(prompt_text+sticky_node_text) + len(input_text) + 1)
 
                 # Display suggestions if applicable
                 if display_suggestions:
