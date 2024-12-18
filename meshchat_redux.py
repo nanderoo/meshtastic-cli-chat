@@ -140,10 +140,10 @@ def on_receive(packet, interface, node_list, stdscr, input_text, message_lines):
             for line in lines:
                 if is_private_message:
                     dest_shortname = next((node['user']['shortName'] for node in node_list if node['num'] == packet['toId']), 'Unknown')
-                    formatted_msg = f"{timestamp} {shortname} to {packet['toId']} ({dest_shortname}) 📩 {line}"
+                    formatted_msg = f"{timestamp} {fromnum} ({shortname}) to {packet['toId']} ({dest_shortname}) > {line}"
                     message_lines.append((formatted_msg, True))  # Store as tuple with PM flag
                 else:
-                    formatted_msg = f"{timestamp} {shortname}: {line}"
+                    formatted_msg = f"{timestamp} {fromnum} ({shortname}) : {line}"
                     message_lines.append((formatted_msg, False))  # Store as tuple with PM flag
 
             # Clear the screen
